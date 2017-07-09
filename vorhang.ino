@@ -4,6 +4,7 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
+#include "websites.h"
 
 #define ONBOARDLED 2
 
@@ -36,6 +37,22 @@ os_timer_t stepperTimer;
 boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
 boolean tasksInitialized = false;
+
+/* constructor declarations */
+void ntpInit();
+void hardwareInit();
+void webServerInit();
+void updateStepper(void *pArg);
+void changeState(int newState);
+void noop();
+void handleSwitchInterrupt();
+float getPositionFromPercentage(int percentage);
+void handleNotFound();
+void loadFromFlash();
+void updatePositionBoundaries();
+void processSyncEvent(NTPSyncEvent_t ntpEvent);
+void initializeTasks();
+
 
 void setup() {
   hardwareInit();
@@ -93,25 +110,28 @@ void hardwareInit(){
 }
 
 void webServerInit(){
+
+   /*
     server.on("/", [](){
-    String page = "<html><head><title>Curtain Control</title> <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/bulma/0.4.3/css/bulma.css\"> <script src=\"https://code.jquery.com/jquery-3.2.1.slim.min.js\" integrity=\"sha256-k2WSCIexGzOj3Euiig+TlR8gA0EmPjuc79OEeY5L45g=\" crossorigin=\"anonymous\"></script></head><body>";
-    page += "<div class=\"container is-fluid\">";
-    page += "<h1 class=\"title\">Curtain Control</h1> <h2 class=\"subtitle\"> Select an action</h2><hr>";
-    page += "<div class=\"field is-grouped\">";
-    page += "<a class=\"button\" href=\"/action?cmd=CLOSE\">Close</a>";
-    page += "<a class=\"button\" href=\"/action?cmd=OPEN\">Open</a>";
-    page += "<a class=\"button\" href=\"/action?cmd=STOP\">Stop</a>";
-    page += "<a class=\"button\" href=\"/action?cmd=STATUS\">Status</a>";
-    page += "<a class=\"button\" href=\"/action?cmd=CALIBRATE\">Calibrate</a>";
-    page += "</div>"; // end field
-    page += "</div>"; // end container
-    page += "<script>";
-    page += "$(document).ready(function(e) {console.log('loaded');});";
-    page += "</script>";
-    page += "</body></html>";
-    
-    server.send(200, "text/html", page);
-  });
+      String page = "<html><head><title>Curtain Control</title> <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/bulma/0.4.3/css/bulma.css\"> <script src=\"https://code.jquery.com/jquery-3.2.1.slim.min.js\" integrity=\"sha256-k2WSCIexGzOj3Euiig+TlR8gA0EmPjuc79OEeY5L45g=\" crossorigin=\"anonymous\"></script></head><body>";
+      page += "<div class=\"container is-fluid\">";
+      page += "<h1 class=\"title\">Curtain Control</h1> <h2 class=\"subtitle\"> Select an action</h2><hr>";
+      page += "<div class=\"field is-grouped\">";
+      page += "<a class=\"button\" href=\"/action?cmd=CLOSE\">Close</a>";
+      page += "<a class=\"button\" href=\"/action?cmd=OPEN\">Open</a>";
+      page += "<a class=\"button\" href=\"/action?cmd=STOP\">Stop</a>";
+      page += "<a class=\"button\" href=\"/action?cmd=STATUS\">Status</a>";
+      page += "<a class=\"button\" href=\"/action?cmd=CALIBRATE\">Calibrate</a>";
+      page += "</div>"; // end field
+      page += "</div>"; // end container
+      page += "<script>";
+      page += "$(document).ready(function(e) {console.log('loaded');});";
+      page += "</script>";
+      page += "</body></html>";
+      
+      
+      server.send(200, "text/html", page);
+    } );*/
 
   server.on("/action", [](){
     String cmd = server.arg("cmd");
@@ -147,6 +167,7 @@ void webServerInit(){
    
   });
 
+  server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("INFO: HTTP server started");
 }
@@ -240,7 +261,7 @@ void updatePositionBoundaries(){
 
 void initializeTasks(){
   Serial.println("INFO: Initializing tasks");
-  Alarm.alarmRepeat(21,55,0,task);
+  //Alarm.alarmRepeat(21,55,0,task);
   tasksInitialized = true;
   NTP.setInterval(NTP_UPDATE_INTERVAL);
   
@@ -249,6 +270,62 @@ void initializeTasks(){
 float getPositionFromPercentage(int percentage){
   uint16_t range = max_pos - min_pos;
   return (float) (min_pos + (float) range/100*percentage);
+}
+
+bool loadFromFlash(String path) {
+  if(path.endsWith("/")) path += "index.html";
+
+  int NumFiles = sizeof(files)/sizeof(struct t_websitefiles);
+
+  for(int i=0; i<NumFiles; i++) {
+    if(path.endsWith(String(files[i].filename))) {     
+      _FLASH_ARRAY<uint8_t>* filecontent;
+      String dataType = "text/plain";
+      unsigned int len = 0;
+      WiFiClient client = server.client();
+     
+      dataType = files[i].mime;
+      len = files[i].len;
+     
+      server.setContentLength(len);
+      server.send(200, files[i].mime, "");
+     
+      filecontent = (_FLASH_ARRAY<uint8_t>*)files[i].content;
+     
+      filecontent->open();
+     
+      client.write(*filecontent, 100);
+      return true;
+    }
+  }
+  
+ 
+  return false;
+}
+void handleNotFound() {
+ 
+  // try to find the file in the flash
+  if(loadFromFlash(server.uri())) return;
+ 
+  String message = "File Not Found\n\n";
+  message += "URI..........: ";
+  message += server.uri();
+  message += "\nMethod.....: ";
+  message += (server.method() == HTTP_GET)?"GET":"POST";
+  message += "\nArguments..: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i=0; i<server.args(); i++){
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  message += "\n";
+  message += "FreeHeap.....: " + String(ESP.getFreeHeap()) + "\n";
+  message += "ChipID.......: " + String(ESP.getChipId()) + "\n";
+  message += "FlashChipId..: " + String(ESP.getFlashChipId()) + "\n";
+  message += "FlashChipSize: " + String(ESP.getFlashChipSize()) + " bytes\n";
+  message += "getCycleCount: " + String(ESP.getCycleCount()) + " Cycles\n";
+  message += "Milliseconds.: " + String(millis()) + " Milliseconds\n";
+  server.send(404, "text/plain", message);
 }
 
 void noop(){}
