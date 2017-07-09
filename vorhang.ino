@@ -30,9 +30,11 @@ int16_t max_pos = 50;
 uint8_t state = 1; // 0 = no action, 1 = close, 2 = open
 uint8_t direction = 0; // 0 = unknown, 1 = close, 2 = open
 
+os_timer_t stepperTimer;
+
 boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
-boolean tasksInitialised = false;
+boolean tasksInitialized = false;
 
 void setup() {
   hardwareInit();
@@ -50,13 +52,15 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  os_timer_setfn(&stepperTimer, updateStepper, NULL);
+  os_timer_arm(&stepperTimer, 10, true);
+
   ntpInit();
 
   webServerInit();
 
-  setTime(8,29,0,1,1,11); // set time to Saturday 8:29:00am Jan 1 2011
 
-  Alarm.alarmRepeat(20,30,0,task);
+  Alarm.timerOnce(15, noop); //required to initialize our scheduler >_>
   
 
 }
@@ -165,12 +169,11 @@ void loop() {
     syncEventTriggered = false;
   }
   
-  updateStepper();
-  Alarm.delay(0);
+  Alarm.delay(0); //tick
 }
 
 /* Updates stepper position*/
-void updateStepper(){
+void updateStepper(void *pArg){
   if(cur_pos != targ_pos && abs(cur_pos) != INT16T_MAX) {
     digitalWrite(enableStepperPin, HIGH);
     
@@ -182,7 +185,7 @@ void updateStepper(){
     digitalWrite(pin2, v>>1&1);
     digitalWrite(pin3, v>>2&1);
     digitalWrite(pin4, v>>3&1);
-    Alarm.delay(20);
+    //Alarm.delay(20);
     //Serial.println(cur_pos);
   } else {
     digitalWrite(enableStepperPin, LOW);
@@ -200,10 +203,11 @@ void processSyncEvent(NTPSyncEvent_t ntpEvent) {
   }
   else {
     setTime(NTP.getTime());
-    if(!tasksInitialised)
-      initializeTasks();    
+    if(!tasksInitialized)
+      initializeTasks();
+    Serial.println("sync " +NTP.getTimeDateString(NTP.getLastNTPSync()));
   }
-  Serial.println("sync " +NTP.getTimeDateString(NTP.getLastNTPSync()));
+  
 }
 
 
@@ -230,6 +234,9 @@ void changeState(int newState){
 }
 
 void initializeTasks(){
+  Serial.println("initializing tasks");
+  Alarm.alarmRepeat(21,15,0,task);
+  tasksInitialized = true;
   
 }
 
@@ -237,4 +244,8 @@ float getPositionFromPercentage(int percentage){
   uint16_t range = max_pos - min_pos;
   return (float) (min_pos + (float) range/100*percentage);
 }
+
+void noop(){
+}
+
 
