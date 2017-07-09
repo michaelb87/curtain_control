@@ -8,6 +8,7 @@
 #define ONBOARDLED 2
 
 #define INT16T_MAX 32767
+#define NTP_UPDATE_INTERVAL 600
 
 const uint8_t pin1 = 16; // D0
 const uint8_t pin2 = 5; // D1
@@ -41,15 +42,15 @@ void setup() {
   
   Serial.begin(115200);
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to Wifi.");
+  Serial.print("INFO: Connecting to Wifi.");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
   Serial.println("");
-  Serial.print("Connected to ");
+  Serial.print("INFO: Connected to ");
   Serial.println(ssid);
-  Serial.print("IP address: ");
+  Serial.print("INFO: IP address: ");
   Serial.println(WiFi.localIP());
 
   os_timer_setfn(&stepperTimer, updateStepper, NULL);
@@ -78,7 +79,7 @@ void ntpInit(){
   });
   
   NTP.begin("pool.ntp.org", 1, true);
-  NTP.setInterval(63);
+  NTP.setInterval(60);
 }
 
 void hardwareInit(){
@@ -147,7 +148,7 @@ void webServerInit(){
   });
 
   server.begin();
-  Serial.println("HTTP server started");
+  Serial.println("INFO: HTTP server started");
 }
 
 
@@ -157,19 +158,16 @@ void loop() {
   
   server.handleClient();
   handleSwitchInterrupt();
-  if(cur_pos>max_pos)
-    max_pos=cur_pos;
-  if(cur_pos<min_pos)
-    min_pos=cur_pos;
-  if(min_pos >= max_pos)
-    min_pos = max_pos-1;
+
+  updatePositionBoundaries();
+
 
   if (syncEventTriggered) {
     processSyncEvent(ntpEvent);    
     syncEventTriggered = false;
   }
   
-  Alarm.delay(0); //tick
+  Alarm.delay(0); // tick
 }
 
 /* Updates stepper position*/
@@ -185,27 +183,25 @@ void updateStepper(void *pArg){
     digitalWrite(pin2, v>>1&1);
     digitalWrite(pin3, v>>2&1);
     digitalWrite(pin4, v>>3&1);
-    //Alarm.delay(20);
-    //Serial.println(cur_pos);
   } else {
     digitalWrite(enableStepperPin, LOW);
   }
   
 }
 
+/* NTP sync event received */
 void processSyncEvent(NTPSyncEvent_t ntpEvent) {
   if (ntpEvent) {
-    Serial.print("Time Sync error: ");
     if (ntpEvent == noResponse)
-      Serial.println("NTP server not reachable");
+      Serial.println("ERROR: NTP server not reachable");
     else if (ntpEvent == invalidAddress)
-      Serial.println("Invalid NTP server address");
+      Serial.println("ERROR: Invalid NTP server address");
   }
   else {
     setTime(NTP.getTime());
     if(!tasksInitialized)
       initializeTasks();
-    Serial.println("sync " +NTP.getTimeDateString(NTP.getLastNTPSync()));
+    Serial.println("INFO: NTP Sync sucessfull at: " +NTP.getTimeDateString(NTP.getLastNTPSync()));
   }
   
 }
@@ -233,10 +229,20 @@ void changeState(int newState){
     direction = newState;
 }
 
+void updatePositionBoundaries(){
+  if(cur_pos>max_pos)
+    max_pos=cur_pos;
+  if(cur_pos<min_pos)
+    min_pos=cur_pos;
+  if(min_pos >= max_pos)
+    min_pos = max_pos-1;
+}
+
 void initializeTasks(){
-  Serial.println("initializing tasks");
-  Alarm.alarmRepeat(21,15,0,task);
+  Serial.println("INFO: Initializing tasks");
+  Alarm.alarmRepeat(21,55,0,task);
   tasksInitialized = true;
+  NTP.setInterval(NTP_UPDATE_INTERVAL);
   
 }
 
@@ -245,7 +251,7 @@ float getPositionFromPercentage(int percentage){
   return (float) (min_pos + (float) range/100*percentage);
 }
 
-void noop(){
-}
+void noop(){}
+void(* resetFunc) (void) = 0;
 
 
