@@ -7,6 +7,8 @@
 
 #define ONBOARDLED 2
 
+#define INT16T_MAX 32767
+
 const uint8_t pin1 = 16; // D0
 const uint8_t pin2 = 5; // D1
 const uint8_t pin3 = 4; // D2
@@ -30,6 +32,7 @@ uint8_t direction = 0; // 0 = unknown, 1 = close, 2 = open
 
 boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
+boolean tasksInitialised = false;
 
 void setup() {
   hardwareInit();
@@ -53,13 +56,15 @@ void setup() {
 
   setTime(8,29,0,1,1,11); // set time to Saturday 8:29:00am Jan 1 2011
 
-  Alarm.timerRepeat(15, Repeats);
-  Alarm.alarmRepeat(19,11,0,Repeats);
+  Alarm.alarmRepeat(20,30,0,task);
   
 
 }
-void Repeats(){
-  Serial.println("15 second timer");         
+
+void task(){
+  Serial.print("task received ");
+  targ_pos = INT16T_MAX;
+  Serial.println(NTP.getTimeDateString(NTP.getLastNTPSync()));
 }
 void ntpInit(){
   
@@ -107,11 +112,11 @@ void webServerInit(){
     String cmd = server.arg("cmd");
     cmd.toLowerCase();
     if(cmd == "open") {
-      targ_pos= -32767;
+      targ_pos= -INT16T_MAX;
       changeState(2);
       server.send(200, "application/json", "{\"error\": false, \"msg\" : \"ok\"}");
     } else if(cmd == "close") {
-      targ_pos= 32767;
+      targ_pos= INT16T_MAX;
       changeState(1);
       server.send(200, "application/json", "{\"error\": false, \"msg\" : \"ok\"}");
     } else if( cmd.indexOf("set-") >= 0 ) {
@@ -129,7 +134,7 @@ void webServerInit(){
       changeState(0);
       server.send(200, "application/json", "{\"error\": false, \"msg\" : \"ok\"}");
     } else if(cmd == "calibrate" ){
-       targ_pos = 32767;
+       targ_pos = INT16T_MAX;
        server.send(200, "application/json", "{\"error\": false, \"msg\" : \"ok\"}");
     } else {
       server.send(200, "application/json", "{\"error\": true, \"msg\" : \"please supply ?cmd. Options are: OPEN, CLOSE, SET-50, STOP, STATUS, CALIBRATE \"}");
@@ -161,26 +166,12 @@ void loop() {
   }
   
   updateStepper();
-
-  static int last = 0;
-
-  if ((millis() - last) > 5100) {
-    //Serial.println(millis() - last);
-    last = millis();
-    Serial.print(NTP.getTimeDateString()); Serial.print(" ");
-    Serial.print(NTP.isSummerTime() ? "Summer Time. " : "Winter Time. ");
-    Serial.print("WiFi is ");
-    Serial.print(WiFi.isConnected() ? "connected" : "not connected"); Serial.print(". ");
-    Serial.print("Uptime: ");
-    Serial.print(NTP.getUptimeString()); Serial.print(" since ");
-    Serial.println(NTP.getTimeDateString(NTP.getFirstSync()).c_str());
-
-  }
+  Alarm.delay(0);
 }
 
 /* Updates stepper position*/
 void updateStepper(){
-  if(cur_pos != targ_pos && abs(cur_pos) != 32767) {
+  if(cur_pos != targ_pos && abs(cur_pos) != INT16T_MAX) {
     digitalWrite(enableStepperPin, HIGH);
     
     if(cur_pos > targ_pos)
@@ -191,7 +182,7 @@ void updateStepper(){
     digitalWrite(pin2, v>>1&1);
     digitalWrite(pin3, v>>2&1);
     digitalWrite(pin4, v>>3&1);
-    delay(20);
+    Alarm.delay(20);
     //Serial.println(cur_pos);
   } else {
     digitalWrite(enableStepperPin, LOW);
@@ -208,12 +199,11 @@ void processSyncEvent(NTPSyncEvent_t ntpEvent) {
       Serial.println("Invalid NTP server address");
   }
   else {
-    Serial.print("Got NTP time: ");
-    Serial.println(NTP.getTimeDateString(NTP.getLastNTPSync()));
-    //String timesStr=NTP.getTimeStr();
-    //setTime(NTP.getTime());
-    
+    setTime(NTP.getTime());
+    if(!tasksInitialised)
+      initializeTasks();    
   }
+  Serial.println("sync " +NTP.getTimeDateString(NTP.getLastNTPSync()));
 }
 
 
@@ -237,6 +227,10 @@ void changeState(int newState){
     state = newState;
   if(newState != 0)
     direction = newState;
+}
+
+void initializeTasks(){
+  
 }
 
 float getPositionFromPercentage(int percentage){
