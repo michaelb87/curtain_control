@@ -29,11 +29,10 @@ app.on({page: 'home', preventClose: false, content: null}, function(activity){
             dataType: 'json',
             success: function(res, xhr) {
                 console.log(res);
-            }/*,
-            error: function(res, flagError, xhr) {
-                console.error(flagError);
-                console.log(res);
-            }*/
+                if(res['error']){
+                    console.log('TODO handle error')
+                }
+            }
         });
 
     }
@@ -49,6 +48,7 @@ app.on({page: 'home', preventClose: false, content: null}, function(activity){
         }
         evt.preventDefault();
     }
+    
     activity.onCreate(function() {
         document.querySelectorAll('.action').on('tap', onAction);
         document.querySelectorAll('.action').on('click', onAction);
