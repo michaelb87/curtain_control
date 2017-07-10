@@ -1,15 +1,19 @@
 #include <Time.h>
 #include <NtpClientLib.h>
-#include <TimeAlarms.h>
+#include "TimeAlarms.h"
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include "websites.h"
+#include <EEPROM.h>
 
 #define ONBOARDLED 2
 
 #define INT16T_MAX 32767
 #define NTP_UPDATE_INTERVAL 600
+#define EPROM_MEMORY_SIZE 512
+#define EEPROM_TASKS_START 0
+#define EEPROM_TASKS 15
 
 const uint8_t pin1 = 16; // D0
 const uint8_t pin2 = 5; // D1
@@ -37,6 +41,20 @@ os_timer_t stepperTimer;
 boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
 boolean tasksInitialized = false;
+AlarmID_t activeTasks;
+
+
+
+struct schedule {
+  int dayOfWeek; // sun = 0, -1 for ignore 
+  int h; // hour
+  int m; // minute
+  int s; // seconds
+  int action; // 1 = close, 2 = open, 3 = set percentage
+  int percentage; // 0-100, ignored if action != 3
+  int active; // -1 if false, 1 if true
+  
+};
 
 /* constructor declarations */
 void ntpInit();
@@ -52,10 +70,19 @@ void loadFromFlash();
 void updatePositionBoundaries();
 void processSyncEvent(NTPSyncEvent_t ntpEvent);
 void initializeTasks();
+void storeSchedule(int addr, schedule s);
+schedule getSchedule(int slot);
+String scheduleToJSON(int slot, boolean incInactive);
+void openCurtain();
+void closeCurtain();
+
 
 
 void setup() {
   hardwareInit();
+  EEPROM.begin(EPROM_MEMORY_SIZE);
+  storeSchedule(0, schedule{-1, 17, 30, 0 , 1 , 100, 1});
+  storeSchedule(1, schedule{-1, 17, 35, 0 , 2 , 100, 1});
   
   Serial.begin(115200);
   WiFi.begin(ssid, password);
@@ -79,15 +106,27 @@ void setup() {
 
 
   Alarm.timerOnce(15, noop); //required to initialize our scheduler >_>
-  
+
+ 
 
 }
 
 void task(){
   Serial.print("task received ");
-  targ_pos = INT16T_MAX;
+  
   Serial.println(NTP.getTimeDateString(NTP.getLastNTPSync()));
 }
+
+void openCurtain(){
+  targ_pos = INT16T_MAX;
+  Serial.println("INFO: Opening curtain at" + NTP.getTimeDateString(NTP.getLastNTPSync()));
+}
+
+void closeCurtain(){
+  targ_pos = -INT16T_MAX;
+  Serial.println("INFO: Closing curtain at" + NTP.getTimeDateString(NTP.getLastNTPSync()));
+}
+
 void ntpInit(){
   
   NTP.onNTPSyncEvent([](NTPSyncEvent_t event) {
@@ -111,27 +150,18 @@ void hardwareInit(){
 
 void webServerInit(){
 
-   /*
-    server.on("/", [](){
-      String page = "<html><head><title>Curtain Control</title> <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/bulma/0.4.3/css/bulma.css\"> <script src=\"https://code.jquery.com/jquery-3.2.1.slim.min.js\" integrity=\"sha256-k2WSCIexGzOj3Euiig+TlR8gA0EmPjuc79OEeY5L45g=\" crossorigin=\"anonymous\"></script></head><body>";
-      page += "<div class=\"container is-fluid\">";
-      page += "<h1 class=\"title\">Curtain Control</h1> <h2 class=\"subtitle\"> Select an action</h2><hr>";
-      page += "<div class=\"field is-grouped\">";
-      page += "<a class=\"button\" href=\"/action?cmd=CLOSE\">Close</a>";
-      page += "<a class=\"button\" href=\"/action?cmd=OPEN\">Open</a>";
-      page += "<a class=\"button\" href=\"/action?cmd=STOP\">Stop</a>";
-      page += "<a class=\"button\" href=\"/action?cmd=STATUS\">Status</a>";
-      page += "<a class=\"button\" href=\"/action?cmd=CALIBRATE\">Calibrate</a>";
-      page += "</div>"; // end field
-      page += "</div>"; // end container
-      page += "<script>";
-      page += "$(document).ready(function(e) {console.log('loaded');});";
-      page += "</script>";
-      page += "</body></html>";
-      
-      
-      server.send(200, "text/html", page);
-    } );*/
+   
+    server.on("/list_schedules", [](){
+      String tasks = "[";
+      for(int t=0;t<EEPROM_TASKS;t++) {
+        String obj = scheduleToJSON(t, false);
+        tasks += obj;
+        if(t != EEPROM_TASKS-1 && obj.length() != 0)
+          tasks += ",";
+      }
+      tasks += "]";
+      server.send(200, "application/json", tasks);
+    } );
 
   server.on("/action", [](){
     String cmd = server.arg("cmd");
@@ -260,8 +290,31 @@ void updatePositionBoundaries(){
 }
 
 void initializeTasks(){
-  Serial.println("INFO: Initializing tasks");
-  //Alarm.alarmRepeat(21,55,0,task);
+  //Alarm.alarmRepeat(17, 07, 00, closeCurtain);
+  Serial.println("INFO: Initializing tasks..");
+  int task_schedule_cnt=0;
+  for(int t=0; t<EEPROM_TASKS; t++){
+    schedule s = getSchedule(t);
+    if(s.active == 1){
+      
+      if(s.dayOfWeek < 0 || s.dayOfWeek > 6){
+        switch(s.action){
+          case 1: Alarm.alarmRepeat(s.h, s.m, s.s, closeCurtain); break;
+          case 2: Alarm.alarmRepeat(s.h, s.m, s.s, openCurtain); break;
+        }
+      } else {
+        timeDayOfWeek_t dow[] = {dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday};
+        switch(s.action){
+          case 1: Alarm.alarmRepeat(dow[s.dayOfWeek], s.h, s.m, s.s, closeCurtain); break;
+          case 2: Alarm.alarmRepeat(dow[s.dayOfWeek], s.h, s.m, s.s, openCurtain); break;
+        }
+        
+      }
+      task_schedule_cnt++;
+      
+    }
+  }
+  Serial.println("INFO: initialized " + String(task_schedule_cnt) + " tasks");
   tasksInitialized = true;
   NTP.setInterval(NTP_UPDATE_INTERVAL);
   
@@ -302,6 +355,33 @@ bool loadFromFlash(String path) {
  
   return false;
 }
+
+void storeSchedule(int slot, schedule s){
+  for (unsigned int t=0; t<sizeof(s); t++){
+    EEPROM.write(EEPROM_TASKS_START + slot*sizeof(s) + t, *((char*)&s + t));
+  }
+  EEPROM.commit();
+   
+}
+
+schedule getSchedule(int slot){
+  schedule s;
+  for (unsigned int t=0; t<sizeof(s); t++)
+    *((char*)&s + t) = EEPROM.read(EEPROM_TASKS_START + slot*sizeof(s) + t);
+  return s;
+}
+
+String scheduleToJSON(int slot, boolean inclInactive){
+  schedule s = getSchedule(slot);
+  if(s.active==1 || inclInactive)
+    return "{dayOfWeek: " + String(s.dayOfWeek) + ", " +  "h: " + String(s.h) + ", " + \
+    "m: " + String(s.m) + ", " +  "s: " + String(s.s) + ", " +  "action: " + String(s.action) +\
+    ", " +  "percentage: " + String(s.percentage) + ", " +  "active: " + String(s.active) +\
+    ", slot: " + slot +"}";
+  else
+    return "";
+}
+
 void handleNotFound() {
  
   // try to find the file in the flash
