@@ -1,6 +1,6 @@
 #include <Time.h>
 #include <NtpClientLib.h>
-#include "TimeAlarms.h"
+#include <TimeAlarms.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
@@ -14,6 +14,7 @@
 #define EPROM_MEMORY_SIZE 512
 #define EEPROM_TASKS_START 0
 #define EEPROM_TASKS 15
+#define dtNBR_ALARMS 20 
 
 const uint8_t pin1 = 16; // D0
 const uint8_t pin2 = 5; // D1
@@ -41,7 +42,7 @@ os_timer_t stepperTimer;
 boolean syncEventTriggered = false; // True if a time even has been triggered
 NTPSyncEvent_t ntpEvent; // Last triggered event
 boolean tasksInitialized = false;
-AlarmID_t activeTasks;
+
 
 
 
@@ -77,12 +78,9 @@ void openCurtain();
 void closeCurtain();
 
 
-
 void setup() {
   hardwareInit();
   EEPROM.begin(EPROM_MEMORY_SIZE);
-  storeSchedule(0, schedule{-1, 17, 30, 0 , 1 , 100, 1});
-  storeSchedule(1, schedule{-1, 17, 35, 0 , 2 , 100, 1});
   
   Serial.begin(115200);
   WiFi.begin(ssid, password);
@@ -111,20 +109,15 @@ void setup() {
 
 }
 
-void task(){
-  Serial.print("task received ");
-  
-  Serial.println(NTP.getTimeDateString(NTP.getLastNTPSync()));
-}
 
 void openCurtain(){
   targ_pos = INT16T_MAX;
-  Serial.println("INFO: Opening curtain at" + NTP.getTimeDateString(NTP.getLastNTPSync()));
+  Serial.println("INFO: Opening curtain at " + NTP.getTimeDateString() );
 }
 
 void closeCurtain(){
   targ_pos = -INT16T_MAX;
-  Serial.println("INFO: Closing curtain at" + NTP.getTimeDateString(NTP.getLastNTPSync()));
+  Serial.println("INFO: Closing curtain at " +  NTP.getTimeDateString() );
 }
 
 void ntpInit(){
@@ -163,6 +156,14 @@ void webServerInit(){
       server.send(200, "application/json", tasks);
     } );
 
+    server.on("/create_schedule", [](){
+      // TODO error handling
+      storeSchedule(server.arg("slot").toInt(), schedule{server.arg("dayOfWeek").toInt(), server.arg("h").toInt(), server.arg("m").toInt(),\
+        server.arg("s").toInt() , server.arg("action").toInt() , server.arg("percentage").toInt(), 1});
+      initializeTasks();
+      return server.send(200, "application/json", scheduleToJSON(server.arg("slot").toInt(), false) );
+    });
+
   server.on("/action", [](){
     String cmd = server.arg("cmd");
     cmd.toLowerCase();
@@ -175,7 +176,6 @@ void webServerInit(){
       changeState(1);
       server.send(200, "application/json", "{\"error\": false, \"msg\" : \"ok\"}");
     } else if( cmd.indexOf("set-") >= 0 ) {
-      
       targ_pos = getPositionFromPercentage(cmd.substring(4).toInt());
       if(targ_pos<cur_pos)
         changeState(2);
@@ -183,7 +183,8 @@ void webServerInit(){
         changeState(1);
       server.send(200, "application/json", "{\"error\": true, \"msg\" : \"Switching to position = " +String(targ_pos) +"\" }");
     } else if(cmd == "status"){
-        server.send(200, "application/json", "{\"error\": false, \"cur_position\" : " + String(cur_pos) + ", \"max_pos\": " + String(max_pos) + ", \"min_pos\" : " +min_pos + ", \"state\" : " +state + "}");
+        server.send(200, "application/json", "{\"error\": false, \"cur_position\" : " + String(cur_pos) + ", \"max_pos\": " + String(max_pos) + \
+        ", \"min_pos\" : " +min_pos + ", \"state\" : " +state + ", \"target_pos\" : "+ targ_pos + "}");
     } else if(cmd == "stop") {
       targ_pos= cur_pos;
       changeState(0);
@@ -290,8 +291,13 @@ void updatePositionBoundaries(){
 }
 
 void initializeTasks(){
-  //Alarm.alarmRepeat(17, 07, 00, closeCurtain);
+  
+  /* clear old alarms*/
   Serial.println("INFO: Initializing tasks..");
+  for(uint8_t id=0; id<dtNBR_ALARMS; id++) {
+    Alarm.free(id);
+  }
+  
   int task_schedule_cnt=0;
   for(int t=0; t<EEPROM_TASKS; t++){
     schedule s = getSchedule(t);

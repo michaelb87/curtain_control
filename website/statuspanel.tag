@@ -1,7 +1,6 @@
 <statuspanel>
 	<div>
 		<input type="range" min="0" max="100" id="percentage-selector" value={percentage} onchange={updatePercentage}>
-		<input type="text" id="percentage-box" value={percentage} onchange={updatePercentage}>
 	</div>
 
 	<script>
@@ -14,6 +13,7 @@
 		}
 
 		self.setPercentage = function (percentage) {
+			state.trigger('set_action_interval');
 	        var req = phonon.ajax({
 		            method: 'GET',
 		            url: 'http://10.0.0.162/action?cmd=SET-'+percentage,
@@ -27,17 +27,18 @@
 		        });
 		}
 
+		state.on('update',function(res){
+			self.percentage = (res['cur_position']-res['min_pos'])*100/(res['max_pos']-res['min_pos']);
+			self.update();
+		})
+
 
 	</script>
 	<!-- get range slider css theme @ http://danielstern.ca/range.css/#/ -->
 	<style scoped>
 		#percentage-selector{
-			width:80%;
+			width:99%;
 			margin: 0px 5px;
-		}
-		#percentage-box{
-			width: 10% ;
-			margin: 0px 5px 0px 15px;
 		}
 
 		input[type=range] {

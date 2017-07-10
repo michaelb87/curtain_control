@@ -32,4 +32,5 @@
     <style scoped>
       .action{cursor: pointer;}
     </style>
+    
 </home>
