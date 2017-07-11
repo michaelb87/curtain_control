@@ -100,4 +100,9 @@ app.on({page: 'home', preventClose: false, content: null}, function(activity){
         document.querySelectorAll('.action').on('click', onAction);
     });
 });
+
+
+app.on({page: 'schedules', preventClose: false, content: null, readyDelay: 1});
+
+
 app.start();

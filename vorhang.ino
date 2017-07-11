@@ -20,8 +20,8 @@ const uint8_t pin1 = 16; // D0
 const uint8_t pin2 = 5; // D1
 const uint8_t pin3 = 4; // D2
 const uint8_t pin4 = 0; // D3
-const uint8_t switchPin = 13; // D7
-const uint8_t enableStepperPin = 12; // D6
+const uint8_t switchPin = 12; // D6
+const uint8_t enableStepperPin = 14; // D5
 
 const char* ssid = "campari";
 const char* password = "aschach59";
@@ -83,6 +83,7 @@ void setup() {
   EEPROM.begin(EPROM_MEMORY_SIZE);
   
   Serial.begin(115200);
+  WiFi.hostname("curtain.lan");
   WiFi.begin(ssid, password);
   Serial.print("INFO: Connecting to Wifi.");
   while (WiFi.status() != WL_CONNECTED) {
@@ -145,23 +146,29 @@ void webServerInit(){
 
    
     server.on("/list_schedules", [](){
-      String tasks = "[";
+      String tasks = "{\"error\": false, \"schedules\": [";
+      int taskCnt = 0;
       for(int t=0;t<EEPROM_TASKS;t++) {
         String obj = scheduleToJSON(t, false);
         tasks += obj;
-        if(t != EEPROM_TASKS-1 && obj.length() != 0)
+        if(obj.length() != 0){
           tasks += ",";
+          taskCnt++;
+        }
       }
-      tasks += "]";
+      if(taskCnt != 0)
+        tasks.remove(tasks.length()-1); // remove last comma
+      tasks += "]}";
       server.send(200, "application/json", tasks);
     } );
 
     server.on("/create_schedule", [](){
       // TODO error handling
+      int isActive = server.arg("active") == "" || server.arg("active")== "1" ? 1 : -1;
       storeSchedule(server.arg("slot").toInt(), schedule{server.arg("dayOfWeek").toInt(), server.arg("h").toInt(), server.arg("m").toInt(),\
-        server.arg("s").toInt() , server.arg("action").toInt() , server.arg("percentage").toInt(), 1});
+        server.arg("s").toInt() , server.arg("action").toInt() , server.arg("percentage").toInt(), isActive});
       initializeTasks();
-      return server.send(200, "application/json", scheduleToJSON(server.arg("slot").toInt(), false) );
+      return server.send(200, "application/json", scheduleToJSON(server.arg("slot").toInt(), true) );
     });
 
   server.on("/action", [](){
@@ -380,10 +387,10 @@ schedule getSchedule(int slot){
 String scheduleToJSON(int slot, boolean inclInactive){
   schedule s = getSchedule(slot);
   if(s.active==1 || inclInactive)
-    return "{dayOfWeek: " + String(s.dayOfWeek) + ", " +  "h: " + String(s.h) + ", " + \
-    "m: " + String(s.m) + ", " +  "s: " + String(s.s) + ", " +  "action: " + String(s.action) +\
-    ", " +  "percentage: " + String(s.percentage) + ", " +  "active: " + String(s.active) +\
-    ", slot: " + slot +"}";
+    return "{\"dayOfWeek\": " + String(s.dayOfWeek) + ", " +  "\"h\": " + String(s.h) + ", " + \
+    "\"m\": " + String(s.m) + ", " +  "\"s\": " + String(s.s) + ", " +  "\"action\": " + String(s.action) +\
+    ", " +  "\"percentage\": " + String(s.percentage) + ", " +  "\"active\": " + String(s.active) +\
+    ", \"slot\": " + slot +"}";
   else
     return "";
 }

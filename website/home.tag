@@ -8,8 +8,8 @@
     <div class="content">
       <ul class="list">
         <li class="divider">Steuerung</li>
-        <li class="action">
-        <statuspanel></statuspanel>
+        <li>
+            <statuspanel></statuspanel>
         </li>
         <li class="action" data-action="open">
             <i class="pull-left icon icon-arrow-back"></i>
@@ -27,10 +27,15 @@
             <i class="pull-left icon icon-sync"></i>
             <span class="padded-list">Kalibrieren</span>
         </li>
+        <li class="divider">Einstellungen</li>
+        <li>
+            <i class="pull-left icon icon-info-outline"></i>
+            <a href="#!schedules" class="padded-list">Zeitplan</a>
+        </li>
       </ul>
     </div>
     <style scoped>
       .action{cursor: pointer;}
     </style>
-    
+
 </home>
