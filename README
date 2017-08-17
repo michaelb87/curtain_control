@@ -1,7 +1,9 @@
 # Curtain control for ESP8266
 
 - Webinterface to open/close curtains
-- Scheduled tasks
+- Task scheduling
+- NTP client
+- DHCP, Wifi
 
 # Components
 
